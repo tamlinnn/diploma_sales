@@ -1,0 +1,227 @@
+SET ThousandSep=' ';
+SET DecimalSep=',';
+SET MoneyThousandSep=' ';
+SET MoneyDecimalSep=',';
+SET MoneyFormat='# ##0,00 ₽;-# ##0,00 ₽';
+SET TimeFormat='h:mm:ss';
+SET DateFormat='YYYY-MM-DD';
+SET TimestampFormat='YYYY-MM-DD h:mm:ss';
+SET FirstWeekDay=0;
+SET BrokenWeeks=1;
+SET ReferenceDay=0;
+SET FirstMonthOfYear=1;
+SET CollationLocale='ru-RU';
+SET CreateSearchIndexOnReload=1;
+SET MonthNames='янв.;февр.;мар.;апр.;мая;июн.;июл.;авг.;сент.;окт.;нояб.;дек.';
+SET LongMonthNames='январь;февраль;март;апрель;май;июнь;июль;август;сентябрь;октябрь;ноябрь;декабрь';
+SET DayNames='пн;вт;ср;чт;пт;сб;вс';
+SET LongDayNames='понедельник;вторник;среда;четверг;пятница;суббота;воскресенье';
+SET NumericalAbbreviation='3:тыс.;6:млн;9:млрд;12:трлн;15:P;18:E;21:Z;24:Y;-3:m;-6:μ;-9:n;-12:p;-15:f;-18:a;-21:z;-24:y';
+
+//выгружаем таблицы базы данных
+LIB CONNECT TO 'PostgreSQL_localhost';
+
+LOAD payment_id, 
+	invoice_id, 
+	date_id, 
+	quantity, 
+	total_price, 
+	tax, 
+	time_payment,
+    hour(time#(left(time_payment, 8))) as hour_payment,
+	payment_type, 
+	cogs, 
+	gross_margin_percentage, 
+	gross_income, 
+	customer_id, 
+	product_id;
+
+[payments]:
+SELECT "payment_id",
+	"invoice_id",
+	"date_id",
+	"quantity",
+	"total_price",
+	"tax",
+	"time_payment",
+	"payment_type",
+	"cogs",
+	"gross_margin_percentage",
+	"gross_income",
+	"customer_id",
+	"product_id"
+FROM "diplom"."payments";
+
+LOAD date_id, 
+	real_date,
+    Month(real_date) as month,
+    QuarterName(real_date) as Quarter,
+    Year(real_date) as Year,
+    WeekDay(real_date) as WeekDay;   
+
+[calendar]:
+SELECT "date_id",
+	"real_date"
+FROM "diplom"."calendar";
+
+LOAD customer_id, 
+	type as customer_type, 
+	gender, 
+	rating;
+
+[customer]:
+SELECT "customer_id",
+	"type",
+	"gender",
+	"rating",
+	"branch_id"
+FROM "diplom"."customer";
+
+LOAD product_id, 
+	product_line, 
+	unit_price;
+
+[product]:
+SELECT "product_id",
+	"product_line",
+	"unit_price",
+	"branch_id"
+FROM "diplom"."product";
+
+LOAD branch_id, 
+	branch_name;
+
+[branch]:
+SELECT "branch_id",
+	"branch_name",
+	"city_id"
+FROM "diplom"."branch";
+
+LOAD city_id, 
+	city;
+
+[city]:
+SELECT "city_id",
+	"city"
+FROM "diplom"."city";
+
+//формируем связи для схемы "Звезда"
+
+NoConcatenate
+LOAD customer_id, 
+	type, 
+	gender, 
+	rating;
+    
+[customer_trans]:
+SELECT "customer_id",
+	"type",
+	"gender",
+	"rating",
+	"branch_id"
+FROM "diplom"."customer";
+
+LEFT JOIN (customer_trans)
+LOAD product_id,
+branch_id;
+
+SELECT "product_id",
+	"product_line",
+	"unit_price",
+	"branch_id"
+FROM "diplom"."product";
+
+LEFT JOIN (customer_trans)
+LOAD branch_id,  
+	city_id;
+
+SELECT "branch_id",
+	"branch_name",
+	"city_id"
+FROM "diplom"."branch";
+
+LEFT JOIN (payments)
+LOAD 
+    product_id,
+    branch_id, 
+    customer_id,
+    city_id
+RESIDENT customer_trans;
+DROP TABLE customer_trans;
+
+
+LEFT JOIN (payments)
+LOAD 
+    date_id,real_date as Удалить
+RESIDENT [calendar];
+
+
+NoConcatenate
+fact:
+LOAD *,
+    product_id&branch_id&city_id&Month(Удалить)&WeekDay(Удалить) as predict_key
+RESIDENT payments;
+DROP TABLE payments;
+
+Drop field [Удалить];
+
+// добавляем данные предиктивной аналитики
+Предикт_временная:
+LOAD
+    City as city,
+    "Customer type" as customer_type,
+    Gender as gender,
+    "Product line" as product_line,
+    "Unit price" as unit_price,
+    Payment as payment_type,
+    "month" as month,
+    "weekday" as WeekDay,
+    Quantity_Predict
+FROM [lib://Predict/Quantity_Predict.csv]
+(txt, codepage is 28591, embedded labels, delimiter is ',', msq);
+
+LIB CONNECT TO 'PostgreSQL_localhost';
+
+Left Join (Предикт_временная)
+LOAD city_id, 
+	city;
+
+SELECT "city_id",
+	"city"
+FROM "diplom"."city";
+
+Left Join (Предикт_временная)
+LOAD branch_id, 
+	city_id;
+
+SELECT "branch_id",
+	"branch_name",
+	"city_id"
+FROM "diplom"."branch";
+
+Left Join (Предикт_временная)
+LOAD product_id, 
+	product_line, 
+	unit_price,
+    branch_id;
+
+SELECT "product_id",
+	"product_line",
+	"unit_price",
+	"branch_id"
+FROM "diplom"."product";
+
+NoConcatenate
+predict_fact:
+LOAD
+    product_id&branch_id&city_id&month&WeekDay as predict_key,
+    Quantity_Predict
+RESIDENT Предикт_временная;
+DROP TABLE Предикт_временная;
+
+Left Join (fact)
+LOAD * RESIDENT predict_fact;
+DROP TABLE predict_fact;
+
+DROP FIELD predict_key;
+
