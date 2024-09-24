@@ -1,0 +1,73 @@
+""" DAG #1 Запускает процедуру PSQL для загрузки данных в базу"""
+
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+
+def psql_function():
+    """Функция, выполняющая инструкцию SQL"""
+    return "Процедура insert_date_for_sales() выполнена успешно!"
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': '2024-09-01',
+    'retries': 3,
+    'retry_delay': timedelta(minutes=5),
+}
+
+with DAG('example_dag', default_args=default_args, schedule_interval="@once") as dag:
+    t1 = PythonOperator(task_id="execute_psql_function", python_callable=insert_date_for_sales())
+
+    t1
+
+
+""" DAG #2 Запускает обработку данных моделью машинного обучения для формирования прогнозных цифр"""
+
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from IPython import get_ipython
+
+def run_notebook(filename):
+    try:
+        # Получаем экземпляр IPython
+        ipython = get_ipython()
+        
+        # Запускаем Notebook
+        with open(filename, 'r') as f:
+            ipython.run_cell_magic('nbconvert', '-f json', f.read())
+            
+        print(f"Notebook '{filename}' executed successfully.")
+    except Exception as e:
+        print(f"Failed to execute notebook: {e}")
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': '2023-01-01',
+    'retries': 3,
+    'retry_delay': timedelta(minutes=5),
+}
+
+with DAG('example_dag', default_args=default_args, schedule_interval="@once") as dag:
+    execute_notebook = PythonOperator(
+        task_id='execute_notebook',
+        python_callable=lambda filename: run_notebook(filename),
+        op_kwargs={
+            'filename': '/path/Обучение/Диплом/diploma_ML_model_1.ipynb'
+        },
+    )
+
+    execute_notebook
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
